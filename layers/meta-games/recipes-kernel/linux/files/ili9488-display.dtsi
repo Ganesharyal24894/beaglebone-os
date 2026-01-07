@@ -48,7 +48,7 @@
 		reset-gpios = <&gpio1 17 GPIO_ACTIVE_LOW>;
 		dc-gpios = <&gpio1 16 GPIO_ACTIVE_HIGH>;
 
-		rotation = <90>;
+		rotate = <90>;
 		bgr;
 		fps = <30>;
 		buswidth = <8>;

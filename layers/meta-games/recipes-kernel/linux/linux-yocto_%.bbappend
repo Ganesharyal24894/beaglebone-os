@@ -3,6 +3,9 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # Add display kernel config fragment
 SRC_URI += "file://display-ili9488.cfg"
 
+# Add ILI9488 driver to kernel tree (makes it in-tree, can be built-in)
+SRC_URI += "file://0001-fbtft-add-fb_ili9488-driver.patch"
+
 # Add display device tree include file
 SRC_URI += "file://ili9488-display.dtsi"
 
