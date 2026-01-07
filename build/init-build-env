@@ -1,0 +1,6 @@
+# init-build-env wrapper created by bitbake-setup
+cd /home/ganesh/embLinux/bitbake-builds/beaglebonePoky/layers/openembedded-core
+set /home/ganesh/embLinux/bitbake-builds/beaglebonePoky/build
+. ./oe-init-build-env
+set --
+
