@@ -1,0 +1,263 @@
+From: Yocto BSP <bsp@example.com>
+Subject: [PATCH] fbtft: Add fb_ili9488 driver for ILI9488 TFT displays
+Upstream-Status: Pending
+
+Add framebuffer driver for ILI9488 TFT LCD panels with 18-bit color
+(RGB666) support. This driver uses the FBTFT framework and converts
+16-bit RGB565 framebuffer data to 18-bit RGB666 for the display.
+
+The ILI9488 is a 480x320 TFT LCD controller commonly found on 3.5"
+SPI displays. Unlike the similar ILI9486 which uses 16-bit color,
+the ILI9488 requires 18-bit color data.
+
+Signed-off-by: Yocto BSP <bsp@example.com>
+---
+ drivers/staging/fbtft/Kconfig      |   6 +
+ drivers/staging/fbtft/Makefile     |   1 +
+ drivers/staging/fbtft/fb_ili9488.c | 201 +++++++++++++++++++++++++++++
+ 3 files changed, 208 insertions(+)
+ create mode 100644 drivers/staging/fbtft/fb_ili9488.c
+
+diff --git a/drivers/staging/fbtft/Kconfig b/drivers/staging/fbtft/Kconfig
+index 4473abb..1234567 100644
+--- a/drivers/staging/fbtft/Kconfig
++++ b/drivers/staging/fbtft/Kconfig
+@@ -81,6 +81,12 @@ config FB_TFT_ILI9486
+ 	help
+ 	  Generic Framebuffer support for ILI9486
+
++config FB_TFT_ILI9488
++	tristate "FB driver for the ILI9488 LCD Controller"
++	depends on FB_TFT
++	help
++	  Generic Framebuffer support for ILI9488 with 18-bit color
++
+ config FB_TFT_PCD8544
+ 	tristate "FB driver for the PCD8544 LCD Controller"
+ 	depends on FB_TFT
+diff --git a/drivers/staging/fbtft/Makefile b/drivers/staging/fbtft/Makefile
+index e9947bd..abcdef1 100644
+--- a/drivers/staging/fbtft/Makefile
++++ b/drivers/staging/fbtft/Makefile
+@@ -18,6 +18,7 @@ obj-$(CONFIG_FB_TFT_ILI9340)     += fb_ili9340.o
+ obj-$(CONFIG_FB_TFT_ILI9341)     += fb_ili9341.o
+ obj-$(CONFIG_FB_TFT_ILI9481)     += fb_ili9481.o
+ obj-$(CONFIG_FB_TFT_ILI9486)     += fb_ili9486.o
++obj-$(CONFIG_FB_TFT_ILI9488)     += fb_ili9488.o
+ obj-$(CONFIG_FB_TFT_PCD8544)     += fb_pcd8544.o
+ obj-$(CONFIG_FB_TFT_RA8875)      += fb_ra8875.o
+ obj-$(CONFIG_FB_TFT_S6D02A1)     += fb_s6d02a1.o
+diff --git a/drivers/staging/fbtft/fb_ili9488.c b/drivers/staging/fbtft/fb_ili9488.c
+new file mode 100644
+index 0000000..fedcba9
+--- /dev/null
++++ b/drivers/staging/fbtft/fb_ili9488.c
+@@ -0,0 +1,201 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * FB driver for the ILI9488 LCD Controller
++ *
++ * Copyright (C) 2023
++ *
++ * Based on fb_ili9486.c and other FBTFT drivers
++ * The ILI9488 uses 18-bit color (RGB666) unlike ILI9486 which uses 16-bit
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/gpio/consumer.h>
++#include <linux/gpio.h>
++#include <linux/delay.h>
++
++#include "fbtft.h"
++
++#define DRVNAME		"fb_ili9488"
++#define WIDTH		320
++#define HEIGHT		480
++
++/* ILI9488 commands */
++#define ILI9488_CMD_SLEEP_OUT           0x11
++#define ILI9488_CMD_DISPLAY_ON          0x29
++#define ILI9488_CMD_COLUMN_ADDRESS_SET  0x2A
++#define ILI9488_CMD_PAGE_ADDRESS_SET    0x2B
++#define ILI9488_CMD_MEMORY_WRITE        0x2C
++#define ILI9488_CMD_MEMORY_ACCESS_CTRL  0x36
++#define ILI9488_CMD_INTERFACE_PIXEL_FMT 0x3A
++#define ILI9488_CMD_POWER_CTRL_1        0xC0
++#define ILI9488_CMD_POWER_CTRL_2        0xC1
++#define ILI9488_CMD_VCOM_CTRL           0xC5
++#define ILI9488_CMD_POSITIVE_GAMMA      0xE0
++#define ILI9488_CMD_NEGATIVE_GAMMA      0xE1
++#define ILI9488_CMD_SET_IMAGE_FUNC      0xE9
++#define ILI9488_CMD_ADJUST_CTRL_3       0xF7
++
++static int init_display(struct fbtft_par *par)
++{
++	par->fbtftops.reset(par);
++	mdelay(120);
++
++	/* Positive Gamma Control */
++	write_reg(par, ILI9488_CMD_POSITIVE_GAMMA,
++		0x00, 0x03, 0x09, 0x08, 0x16,
++		0x0A, 0x3F, 0x78, 0x4C, 0x09,
++		0x0A, 0x08, 0x16, 0x1A, 0x0F);
++
++	/* Negative Gamma Control */
++	write_reg(par, ILI9488_CMD_NEGATIVE_GAMMA,
++		0x00, 0x16, 0x19, 0x03, 0x0F,
++		0x05, 0x32, 0x45, 0x46, 0x04,
++		0x0E, 0x0D, 0x35, 0x37, 0x0F);
++
++	/* Power Control 1 */
++	write_reg(par, ILI9488_CMD_POWER_CTRL_1, 0x17, 0x15);
++
++	/* Power Control 2 */
++	write_reg(par, ILI9488_CMD_POWER_CTRL_2, 0x41);
++
++	/* VCOM Control */
++	write_reg(par, ILI9488_CMD_VCOM_CTRL, 0x00, 0x12, 0x80);
++
++	/* Memory Access Control - sets rotation */
++	write_reg(par, ILI9488_CMD_MEMORY_ACCESS_CTRL, 0x48);
++
++	/* Interface Pixel Format - 18bit/pixel for SPI */
++	write_reg(par, ILI9488_CMD_INTERFACE_PIXEL_FMT, 0x66);
++
++	/* Set Image Function */
++	write_reg(par, ILI9488_CMD_SET_IMAGE_FUNC, 0x00);
++
++	/* Adjust Control 3 */
++	write_reg(par, ILI9488_CMD_ADJUST_CTRL_3, 0xA9, 0x51, 0x2C, 0x82);
++
++	/* Sleep Out */
++	write_reg(par, ILI9488_CMD_SLEEP_OUT);
++	mdelay(120);
++
++	/* Display On */
++	write_reg(par, ILI9488_CMD_DISPLAY_ON);
++	mdelay(25);
++
++	return 0;
++}
++
++static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
++{
++	write_reg(par, ILI9488_CMD_COLUMN_ADDRESS_SET,
++		(xs >> 8) & 0xFF, xs & 0xFF,
++		(xe >> 8) & 0xFF, xe & 0xFF);
++
++	write_reg(par, ILI9488_CMD_PAGE_ADDRESS_SET,
++		(ys >> 8) & 0xFF, ys & 0xFF,
++		(ye >> 8) & 0xFF, ye & 0xFF);
++
++	write_reg(par, ILI9488_CMD_MEMORY_WRITE);
++}
++
++/*
++ * Convert 16-bit RGB565 to 18-bit RGB666 for ILI9488
++ * RGB565: RRRRRGGGGGGBBBBB (16 bits)
++ * RGB666: RRRRRR00 GGGGGG00 BBBBBB00 (24 bits, 6 bits per color)
++ */
++static int write_vmem16_bus8(struct fbtft_par *par, size_t offset, size_t len)
++{
++	u16 *vmem16;
++	u8 *txbuf = par->txbuf.buf;
++	size_t remain;
++	size_t to_copy;
++	size_t tx_array_size;
++	int i;
++	int ret = 0;
++	size_t startbyte_size = 0;
++
++	if (par->gpio.dc)
++		gpiod_set_value(par->gpio.dc, 1);
++
++	/* Calculate pixels that fit in tx buffer (3 bytes per pixel for RGB666) */
++	tx_array_size = par->txbuf.len / 3;
++	remain = len / 2;  /* Number of 16-bit pixels */
++	vmem16 = (u16 *)(par->info->screen_buffer + offset);
++
++	if (par->startbyte) {
++		txbuf[0] = par->startbyte | 0x02;
++		startbyte_size = 1;
++		tx_array_size = (par->txbuf.len - 1) / 3;
++	}
++
++	while (remain) {
++		to_copy = min(remain, tx_array_size);
++		for (i = 0; i < to_copy; i++) {
++			u16 pixel = vmem16[i];
++			u8 r, g, b;
++
++			/* Extract RGB565 components */
++			r = (pixel >> 11) & 0x1F;  /* 5 bits */
++			g = (pixel >> 5) & 0x3F;   /* 6 bits */
++			b = pixel & 0x1F;          /* 5 bits */
++
++			/* Convert to RGB666 (6 bits each, left-aligned in byte) */
++			txbuf[startbyte_size + i * 3 + 0] = (r << 3) | (r >> 2);  /* R: 5->6 bits */
++			txbuf[startbyte_size + i * 3 + 1] = g << 2;               /* G: already 6 bits */
++			txbuf[startbyte_size + i * 3 + 2] = (b << 3) | (b >> 2);  /* B: 5->6 bits */
++		}
++
++		vmem16 += to_copy;
++		ret = par->fbtftops.write(par, par->txbuf.buf,
++					  startbyte_size + to_copy * 3);
++		if (ret < 0)
++			return ret;
++		remain -= to_copy;
++	}
++
++	return ret;
++}
++
++static int set_var(struct fbtft_par *par)
++{
++	u8 madctl = 0x08;  /* BGR bit set */
++
++	switch (par->info->var.rotate) {
++	case 0:
++		madctl |= 0x40;  /* MX */
++		break;
++	case 90:
++		madctl |= 0x20;  /* MV */
++		break;
++	case 180:
++		madctl |= 0x80;  /* MY */
++		break;
++	case 270:
++		madctl |= 0x40 | 0x80 | 0x20;  /* MX | MY | MV */
++		break;
++	}
++
++	write_reg(par, ILI9488_CMD_MEMORY_ACCESS_CTRL, madctl);
++
++	return 0;
++}
++
++static struct fbtft_display display = {
++	.regwidth = 8,
++	.width = WIDTH,
++	.height = HEIGHT,
++	.txbuflen = 32768,
++	.fbtftops = {
++		.init_display = init_display,
++		.set_addr_win = set_addr_win,
++		.write_vmem = write_vmem16_bus8,
++		.set_var = set_var,
++	},
++};
++
++FBTFT_REGISTER_DRIVER(DRVNAME, "ilitek,ili9488", &display);
++
++MODULE_ALIAS("spi:" DRVNAME);
++MODULE_ALIAS("platform:" DRVNAME);
++MODULE_ALIAS("spi:ili9488");
++MODULE_ALIAS("platform:ili9488");
++
++MODULE_DESCRIPTION("FB driver for the ILI9488 LCD Controller");
++MODULE_AUTHOR("Yocto BSP");
++MODULE_LICENSE("GPL");
+--
+2.39.0

@@ -1,0 +1,62 @@
+/* ILI9488 3.5" SPI Display Device Tree Include
+ *
+ * Pin connections (BeagleBone Black):
+ *   Display    | BBB Pin   | BBB Signal
+ *   -----------+-----------+-----------
+ *   VCC        | P9.3/4    | 3.3V
+ *   GND        | P9.1/2    | GND
+ *   CS         | P9.17     | SPI0_CS0
+ *   RESET      | P9.23     | GPIO1_17
+ *   DC/RS      | P9.15     | GPIO1_16
+ *   SDI(MOSI)  | P9.18     | SPI0_D1
+ *   SCK        | P9.22     | SPI0_SCLK
+ *   LED        | P9.3/4    | 3.3V (or PWM for brightness)
+ *   SDO(MISO)  | P9.21     | SPI0_D0 (optional)
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+&am33xx_pinmux {
+	spi0_pins: spi0-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_SPI0_SCLK, PIN_OUTPUT_PULLUP, MUX_MODE0)  /* SPI0_SCLK */
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D0, PIN_INPUT_PULLUP, MUX_MODE0)     /* SPI0_D0 (MISO) */
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLUP, MUX_MODE0)    /* SPI0_D1 (MOSI) */
+			AM33XX_PADCONF(AM335X_PIN_SPI0_CS0, PIN_OUTPUT_PULLUP, MUX_MODE0)   /* SPI0_CS0 */
+		>;
+	};
+
+	display_pins: display-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_A1, PIN_OUTPUT, MUX_MODE7)  /* GPIO1_17 - RESET */
+			AM33XX_PADCONF(AM335X_PIN_GPMC_A0, PIN_OUTPUT, MUX_MODE7)  /* GPIO1_16 - DC */
+		>;
+	};
+};
+
+&spi0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_pins>;
+
+	display@0 {
+		compatible = "ilitek,ili9488";
+		reg = <0>;
+		spi-max-frequency = <20000000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&display_pins>;
+
+		/* GPIO configuration:
+		 * RESET: Active LOW (pull low to reset, high for normal operation)
+		 * DC: Active HIGH (low=command, high=data)
+		 */
+		reset-gpios = <&gpio1 17 GPIO_ACTIVE_LOW>;
+		dc-gpios = <&gpio1 16 GPIO_ACTIVE_HIGH>;
+
+		/* Display settings */
+		rotate = <90>;
+		bgr;
+		fps = <30>;
+		buswidth = <8>;
+	};
+};
